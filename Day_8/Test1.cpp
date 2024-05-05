@@ -1,177 +1,78 @@
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include <string.h>
-//
-//// Hàm để phân tích tệp SREC đầu vào
-//int parse_srec_file(const char *input_file, const char *output_file) {
-//    FILE *input_fp = fopen(input_file, "r");
-//    FILE *output_fp = fopen(output_file, "w");
-//
-//    if (input_fp == NULL || output_fp == NULL) {
-//        printf("Loi mo tep.\n");
-//        return -1;
-//    }
-//
-//    char line[80]; // Giả định độ dài dòng tối đa là 80 ký tự
-//    int error_flag = 0;
-//
-//    while (fgets(line, sizeof(line), input_fp) != NULL) {
-//        line[strcspn(line, "\r\n")] = 0; // Loại bỏ ký tự xuống dòng
-//        if (line[0] == 'S' && line[1] == '1') {
-//            // Phân tích dòng ghi S1
-//            char byte_count_str[3], address_str[5], data[64], checksum_str[3];
-//            strncpy(byte_count_str, line + 2, 2);
-//            byte_count_str[2] = '\0';
-//            int byte_count = strtol(byte_count_str, NULL, 16);
-//
-//            strncpy(address_str, line + 4, 4);
-//            address_str[4] = '\0';
-//            int address = strtol(address_str, NULL, 16);
-//
-//            int data_length = byte_count * 2;
-//            strncpy(data, line + 8, data_length);
-//            data[data_length] = '\0';
-//
-//            strncpy(checksum_str, line + 8 + data_length, 2);
-//            checksum_str[2] = '\0';
-//            int checksum = strtol(checksum_str, NULL, 16);
-//
-//            // Thực hiện tính toán checksum
-//            int calculated_checksum = byte_count + (address >> 8) + (address & 0xFF);
-//            for (int i = 0; i < data_length; i += 2) {
-//                char byte_str[3];
-//                strncpy(byte_str, data + i, 2);
-//                byte_str[2] = '\0';
-//                calculated_checksum += strtol(byte_str, NULL, 16);
-//            }
-//            calculated_checksum &= 0xFF;
-//            calculated_checksum = (~calculated_checksum) & 0xFF;
-//
-//            if (checksum != calculated_checksum) {
-//                printf("Loi checksum trong dong: %s\n", line);
-//                error_flag = 1;
-//            } else {
-//                fprintf(output_fp, "%04X %s\n", address, data);
-//            }
-//        }
-//    }
-//
-//    fclose(input_fp);
-//    fclose(output_fp);
-//
-//    return error_flag;
-//}
-//
-//int main() {
-//    const char *input_file = "input.srec";
-//    const char *output_file = "Output.txt";
-//
-//    int error_flag = parse_srec_file(input_file, output_file);
-//
-//    if (error_flag) {
-//        printf("Co loi xay ra, vui long kiem tra tep Output.\n");
-//    } else {
-//        printf("Phan tich hoan tat thanh cong. Tep Output: %s\n", output_file);
-//    }
-//
-//    return 0;
-//}
-
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
 
-#define MAX_LINE_LENGTH 256
-
-// Struct to hold parsed data
-typedef struct {
-    int address;
-    int length;
-    unsigned char *data;
-    int checksum;
-} SRecord;
-
-// Function to parse SRecord lines
-int parseSRecordLine(char *line, SRecord *record) {
-    int i;
-    int sum = 0;
-
-    // Check if line starts with 'S' character
-    if (line[0] != 'S')
-        return -1;
-
-    // Parse record type
-    sscanf(line, "S%d", &record->length);
-
-    // Parse address
-    sscanf(line + 2, "%2x", &record->address);
-
-    // Parse data
-    record->data = (unsigned char *)malloc(sizeof(unsigned char) * record->length);
-    for (i = 0; i < record->length - 1; i++) {
-        sscanf(line + 4 + i * 2, "%2x", &record->data[i]);
-        sum += record->data[i];
+// Hàm tính checksum
+unsigned char calculateChecksum(const char *data, int count) {
+    unsigned int sum = 0;
+    for (int i = 0; i < count; i += 2) {
+        char hex[3];
+        strncpy(hex, &data[i], 2);
+        hex[2] = '\0';
+        sum += (unsigned char)strtol(hex, NULL, 16);
     }
+    return ~(unsigned char)(sum & 0xFF) + 1;
+}
 
-    // Parse checksum
-    sscanf(line + 4 + i * 2, "%2x", &record->checksum);
+// Hàm kiểm tra checksum của một dòng SREC
+int checkSRECLine(const char *line) {
+    int count = strlen(line) - 4; // Bỏ qua Sx và byte count
+    char checksumValue[3];
+    strncpy(checksumValue, line + count, 2);
+    checksumValue[2] = '\0';
+    unsigned char checksum = (unsigned char)strtol(checksumValue, NULL, 16);
 
-    // Verify checksum
-    sum = (~sum) & 0xFF;
-    if (sum != record->checksum)
-        return -2;
-
-    return 0;
+    // Tính toán checksum
+    unsigned char calculatedChecksum = calculateChecksum(line + 2, count - 2);
+    return checksum != calculatedChecksum;
 }
 
 int main() {
-    FILE *inputFile, *outputFile;
-    char line[MAX_LINE_LENGTH];
-    SRecord record;
+    FILE *inputFile = fopen("input.srec", "r");
+    FILE *outputFile = NULL;
+    char line[1024];
     int lineNumber = 0;
-    int error = 0;
 
-    // Open input file
-    inputFile = fopen("input.srec", "r");
     if (inputFile == NULL) {
-        printf("Error opening input file.\n");
+        printf("Khong the mo file input.srec\n");
         return 1;
     }
 
-    // Open output file
-    outputFile = fopen("Output.txt", "w");
-    if (outputFile == NULL) {
-        printf("Error opening output file.\n");
-        fclose(inputFile);
-        return 1;
-    }
-
-    // Parse input file
     while (fgets(line, sizeof(line), inputFile)) {
         lineNumber++;
-        error = parseSRecordLine(line, &record);
-        if (error == -1) {
-            printf("Error parsing line %d: Invalid SRecord format\n", lineNumber);
-            continue;
-        } else if (error == -2) {
-            printf("Error parsing line %d: Checksum mismatch\n", lineNumber);
-            continue;
+        // Loại bỏ ký tự xuống dòng
+        line[strcspn(line, "\n")] = 0;
+
+        if (checkSRECLine(line)) {
+            printf("Loi checksum o dong %d: %s\n", lineNumber, line);
+            fclose(inputFile);
+            return 1;
         } else {
-            // Write to output file
-            fprintf(outputFile, "%X ", record.address);
-            for (int i = 0; i < record.length - 1; i++) {
-                fprintf(outputFile, "%02X", record.data[i]);
+            if (outputFile == NULL) {
+                outputFile = fopen("Output.txt", "w");
+                if (outputFile == NULL) {
+                    printf("Khong the tao file Output.txt\n");
+                    fclose(inputFile);
+                    return 1;
+                }
             }
-            fprintf(outputFile, "\n");
+            // Parse address và data từ dòng SREC
+            char address[5];
+            char data[33];
+            int dataLength = (line[2] - '0') * 16 + (line[3] - '0') - 5; // Sx, byte count, address và checksum
+            strncpy(address, line + 4, 4);
+            address[4] = '\0';
+            strncpy(data, line + 8, dataLength * 2);
+            data[dataLength * 2] = '\0';
+
+            fprintf(outputFile, "%s %s\n", address, data);
         }
     }
 
-    // Close files
     fclose(inputFile);
-    fclose(outputFile);
-
-    printf("Parsing completed.\n");
+    if (outputFile != NULL) {
+        fclose(outputFile);
+    }
 
     return 0;
 }
-
